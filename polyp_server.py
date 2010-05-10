@@ -32,7 +32,7 @@ def main(args):
   tfactory = TTransport.TBufferedTransportFactory()
   pfactory = TBinaryProtocol.TBinaryProtocolFactory()
 
-  server = TServer.TSimpleServer(processor, transport, tfactory, pfactory)
+  server = TServer.TThreadPoolServer(processor, transport, tfactory, pfactory)
 
 
   print "Starting polyp server on %d" % port
