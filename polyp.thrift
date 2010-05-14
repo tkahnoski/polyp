@@ -7,14 +7,19 @@
 
 namespace cpp polyp
 namespace java polyp
-namespace python polyp_gen
+namespace python polyp
 
+struct Endpoint
+{
+  1: required string address
+  2: required i32 port
+}
 
 struct Header
 {
   1: string id
-  2: string sender
-  3: string type
+  2: Endpoint sender
+  3: string msg_type
   4: string verb
 }
 
