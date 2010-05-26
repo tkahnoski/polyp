@@ -15,11 +15,12 @@ from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 
 class PolypClient(object):
-  def __init__(self,this_endpoint):
+  def __init__(self,this_endpoint,remote):
     self.msg_id = 0
     self.endpoint = this_endpoint
+    self.remote = remote
     self.transport = \
-        TSocket.TSocket(self.endpoint.address,self.endpoint.port)
+        TSocket.TSocket(self.remote.address,self.remote.port)
     self.buf_transport = TTransport.TBufferedTransport(self.transport)
     self.protocol = TBinaryProtocol.TBinaryProtocol(self.buf_transport)
     self.client = Daemon.Client(self.protocol)
@@ -37,15 +38,45 @@ class PolypClient(object):
     self.msg_id += 1
     return str(id)
 
+class PolypPool:
+#Thrift objects aren't hashable so we use key (address,port)
+  MAX_POOLSIZE=4
+  def __init__(self,this_endpoint):
+    self.endpoint = this_endpoint
+    self.client_pool = {}
+  def get(self,remote):
+    #TODO: lock
+    key = (remote.address,remote.port)
+    items = self.client_pool.get(key,None)
+    if items is None:
+      items = []
+      self.client_pool[key] = items
+    if len(items) == 0:
+      return PolypClient(self.endpoint,remote)
+    client = items.pop()
+    self.client_pool[key] = items
+    return client
+  def release_client(self,client):
+    #TODO: lock
+    #TODO: put LRU remote if MAX_ENDPOINTS is exceeded
+    key = (client.remote.address,client.remote.port)
+    self.client_pool.setdefault(key,[])
+    if len(self.client_pool[key]) >= PolypPool.MAX_POOLSIZE:
+      return
+    self.client_pool[key].append(client)
+
+
+
 def main(args):
   p = optparse.OptionParser()
   p.add_option("--server","-s",help="Server host",default="localhost")
   p.add_option("--port","-p",help="Server port",type="int",default=9999)
-  
+
   opts,args = p.parse_args(args)
   messages = args
   print 'Connecting to %s:%d' % (opts.server,opts.port)
-  client = PolypClient(Endpoint(opts.server,opts.port))
+  client_pool = PolypPool(Endpoint("localhost",0000))
+  client = client_pool.get(Endpoint(opts.server,opts.port))
   if len(messages) == 0:
     print 'Reading messages from stdin one per line'
     messages = sys.stdin
