@@ -31,7 +31,7 @@ struct Message
 
 service Daemon
 {
-  void receive(1: Message message);
+  oneway void receive(1: Message message);
 }
 
 
