@@ -34,6 +34,7 @@ def read_seeds(stream):
       cols = stripped.split(':',1)
       seeds.append((cols[0],int(cols[1])) )
   return seeds
+
 class SynThread(Thread):
   def __init__(self,gossiper,delay):
     Thread.__init__(self,name="SynThread")
@@ -72,13 +73,14 @@ class GossipHandler:
     self.outbound.get(sender).send_obj("gossip",VERB_ACK,ackMsg)
   def ack(self,sender,ack_msg):
     debug_print('ack:', ack_msg)
-    #TODO: self.update_states(ack_msg.known,self.endpoints)
+    self.update_states(ack_msg.known)
     if len(ack_msg.requested) > 0:
       unknown, known = examine_digest_list(ack_msg.requested,self.endpoints)
       ackBackMsg = GossipAckBackMessage(known)
       self.outbound.get(sender).send_obj("gossip",VERB_ACKBACK,ackBackMsg)
   def ackBack(self,sender,ack_back_msg):
     debug_print('ack_back:', ack_back_msg)
+    self.update_states(ack_back_msg.known)
   #Take a polyp Message and dispatch based on verb
   def handleMessage(self,message):
     #TODO: this needs to be fast
@@ -96,13 +98,15 @@ class GossipHandler:
     if len(endpoints) == 1:
       return
     chosen = random.choice(endpoints)
-    if chosen == self.local:
-      send_random(endpoints,msg_type,msg_verb,message)
-      return
+    local_key = ep_pair(self.local)
+    if chosen != local_key:
+      eps = endpoints[:]
+      eps.remove(local_key)
+      chosen = random.choice(eps)
+    print 'sending syn to ', chosen
     contact = Endpoint(chosen[0],chosen[1])
     self.outbound.get(contact).send_obj(msg_type,msg_verb,message)
   def gossip_round(self):
-    #TODO: lock down gossip process
     self.heartbeat.version += 1
     print "-" * 80
     print 'Starting gossip round %d ' % self.heartbeat.version
@@ -122,6 +126,23 @@ class GossipHandler:
               max_generation(x),
               max_version(x))
             for x in rand_endpoints]
+  def update_states(self,epStates):
+    for state in epStates:
+      if state.endpoint == self.local:
+        continue
+      ep_key = ep_pair(state.endpoint)
+      local_ep = self.endpoints.get(ep_key)
+      if local_ep is None:
+        #TODO
+        # check quarantine
+        # notifications?
+        self.endpoints[ep_key] = state
+      elif local_ep.heartbeat.generation < state.heartbeat.generation:
+        self.endpoints[ep_key] = state
+        #TODO: notifications?
+      elif local_ep.heartbeat.generation == state.heartbeat.generation \
+        and max_version(local_ep) < max_version(state):
+        update_ep_state(local_ep,state)
 
 def max_version(state):
   states = state.info.values()[:]
@@ -136,7 +157,7 @@ def get_bigger_states(epState,version):
   states = filter(lambda x: x[1].version > version, epState.info.items())
   return EndpointState(epState.endpoint, epState.heartbeat,dict(states))
 
-#Return tuple of states that need updating and known states 
+#Return tuple of states that need updating and known states
 def examine_digest_list(remote_digests,localEpMap):
   unknown = []
   knownStates = []
@@ -162,3 +183,19 @@ def examine_digest_list(remote_digests,localEpMap):
     else:
       unknown.append(EndpointDigest(digest.endpoint,remote_gen,0))
   return (unknown,knownStates)
+
+#Mutate current state in place with changes from latest
+def update_ep_state(current_state,latest_state):
+ current_state.heartbeat = latest_state.heartbeat
+ current_map = current_state.info
+ latest_map = latest_state.info
+ for k, latest_v in latest_map.items():
+   current_v = current_map.get(k)
+   if current_v is None:
+     current_map[k] = latest_v
+   elif current_v.generation < latest_v.generation:
+     current_map[k] = latest_v
+   elif current_v.generation == latest_v.generation \
+     and current_v.version < latest_v.version:
+     current_map[k] = latest_v
+ 
