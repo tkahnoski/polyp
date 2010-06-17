@@ -18,6 +18,11 @@ from thrift.transport import TTransport
 VERB_SYN="syn"
 VERB_ACK="ack"
 VERB_ACKBACK="ackback"
+#TODO: delete
+def debug_print(header,obj):
+  print "-" * 80
+  print header
+  print obj
 
 #parse host:port lines into (host,port)
 def read_seeds(stream):
@@ -61,14 +66,19 @@ class GossipHandler:
     self.outbound = sending_service
     self.synThread = SynThread(self,delay)
   def syn(self,sender,syn_msg):
-    print 'syn:!', syn_msg
+    debug_print('syn:', syn_msg)
     unknown, known = examine_digest_list(syn_msg.digests,self.endpoints)
-    print unknown
-    print known
+    ackMsg = GossipAckMessage(unknown,known)
+    self.outbound.get(sender).send_obj("gossip",VERB_ACK,ackMsg)
   def ack(self,sender,ack_msg):
-    print 'ack:', ack_msg
+    debug_print('ack:', ack_msg)
+    #TODO: self.update_states(ack_msg.known,self.endpoints)
+    if len(ack_msg.requested) > 0:
+      unknown, known = examine_digest_list(ack_msg.requested,self.endpoints)
+      ackBackMsg = GossipAckBackMessage(known)
+      self.outbound.get(sender).send_obj("gossip",VERB_ACKBACK,ackBackMsg)
   def ackBack(self,sender,ack_back_msg):
-    print 'ack_back:', ack_back_msg
+    debug_print('ack_back:', ack_back_msg)
   #Take a polyp Message and dispatch based on verb
   def handleMessage(self,message):
     #TODO: this needs to be fast
@@ -77,10 +87,10 @@ class GossipHandler:
       self.syn(message.header.sender,synMsg)
     elif message.header.verb == VERB_ACK:
       ackMsg = polyp_util.deserialize(GossipAckMessage(),message.body)
-      ackMsg.read(protocolIn)
       self.ack(message.header.sender,ackMsg)
     elif message.header.verb == VERB_ACKBACK:
-      ackMsg = polyp_util.deserialize(GossipAckMessage(),message.body)
+      ackBackMsg = polyp_util.deserialize(
+          GossipAckBackMessage(),message.body)
       self.ackBack(message.header.sender,ackBackMsg)
   def send_random(self,endpoints,message,msg_type,msg_verb):
     if len(endpoints) == 1:
@@ -91,10 +101,10 @@ class GossipHandler:
       return
     contact = Endpoint(chosen[0],chosen[1])
     self.outbound.get(contact).send_obj(msg_type,msg_verb,message)
-  
   def gossip_round(self):
     #TODO: lock down gossip process
     self.heartbeat.version += 1
+    print "-" * 80
     print 'Starting gossip round %d ' % self.heartbeat.version
     if len(self.endpoints) == 1:
       print 'No one to gossip to :-('
