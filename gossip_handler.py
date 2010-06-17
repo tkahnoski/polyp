@@ -47,7 +47,7 @@ def ep_pair(endpoint):
 class GossipHandler:
   #Initialize gossiper and start thread to periodically gossip
   #Requires generation number
-  def __init__(self,sending_service,local,generation,seeds=[],delay=1.0):
+  def __init__(self,sending_service,local,generation,seeds=[],delay=4.0):
     self.generation = generation
     self.local = local
     self.heartbeat = HeartBeatState(generation,1)
@@ -62,6 +62,9 @@ class GossipHandler:
     self.synThread = SynThread(self,delay)
   def syn(self,sender,syn_msg):
     print 'syn:!', syn_msg
+    unknown, known = examine_digest_list(syn_msg.digests,self.endpoints)
+    print unknown
+    print known
   def ack(self,sender,ack_msg):
     print 'ack:', ack_msg
   def ackBack(self,sender,ack_back_msg):
@@ -108,7 +111,7 @@ class GossipHandler:
     return [EndpointDigest(x.endpoint,
               max_generation(x),
               max_version(x))
-            for x in rand_endpoints  ]
+            for x in rand_endpoints]
 
 def max_version(state):
   states = state.info.values()[:]
@@ -118,5 +121,34 @@ def max_generation(state):
   states = state.info.values()[:]
   states.append(state.heartbeat)
   return max(states,key=lambda x: x.generation).generation
+#Return a new endpoint state
+def get_bigger_states(epState,version):
+  states = filter(lambda x: x[1].version > version, epState.info.items())
+  return EndpointState(epState.endpoint, epState.heartbeat,dict(states))
 
-
+#Return tuple of states that need updating and known states 
+def examine_digest_list(remote_digests,localEpMap):
+  unknown = []
+  knownStates = []
+  for digest in remote_digests:
+    remote_gen = digest.generation
+    remote_v = digest.version
+    ep_key = (digest.endpoint.address,digest.endpoint.port)
+    epState = localEpMap.get(ep_key)
+    if not epState is None:
+      local_gen = max_generation(epState)
+      local_v = max_version(epState)
+      if remote_gen == local_gen and remote_v == local_v:
+        continue
+      if remote_gen > local_gen:
+        unknown.append(digest.endpoint,remote_gen,0)
+      elif remote_gen < local_gen:
+        knownStates.append(get_bigger_states(epState,0))
+      elif remote_v > local_v:
+        unknown.append(
+          EndpointDigest(digest.endpoint,remote_gen,local_v))
+      elif remote_v < local_v:
+        knownStates.append(get_bigger_states(epState,remote_v))
+    else:
+      unknown.append(EndpointDigest(digest.endpoint,remote_gen,0))
+  return (unknown,knownStates)

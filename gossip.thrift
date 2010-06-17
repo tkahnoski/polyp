@@ -54,7 +54,7 @@ struct GossipSynMessage
 
 struct GossipAckMessage
 {
-  1: required map<string,HeartBeatState> requested
+  1: required list<EndpointDigest> requested
   2: required list<EndpointState> known
 }
 
