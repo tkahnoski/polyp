@@ -20,9 +20,9 @@ VERB_ACK="ack"
 VERB_ACKBACK="ackback"
 #TODO: delete
 def debug_print(header,obj):
-  print "-" * 80
-  print header
-  print obj
+  print >>sys.stderr, "-" * 80
+  print >>sys.stderr, header
+  print >>sys.stderr, obj
 
 #parse host:port lines into (host,port)
 def read_seeds(stream):
@@ -60,6 +60,8 @@ class GossipHandler:
     self.state = EndpointState(self.local,self.heartbeat,{})
     self.endpoints = {}
     self.endpoints[ep_pair(self.local)] = self.state
+    self.unreachable = []
+    self.quarantine = {}#{Endpoint : sys time of rejoin}
     for seed in seeds:
       self.endpoints[seed] = \
         EndpointState(Endpoint(seed[0],seed[1]),HeartBeatState(FIRST_GEN,0),{})
@@ -70,14 +72,14 @@ class GossipHandler:
     debug_print('syn:', syn_msg)
     unknown, known = examine_digest_list(syn_msg.digests,self.endpoints)
     ackMsg = GossipAckMessage(unknown,known)
-    self.outbound.get(sender).send_obj("gossip",VERB_ACK,ackMsg)
+    self.send(sender,VERB_ACK,ackMsg)
   def ack(self,sender,ack_msg):
     debug_print('ack:', ack_msg)
     self.update_states(ack_msg.known)
     if len(ack_msg.requested) > 0:
       unknown, known = examine_digest_list(ack_msg.requested,self.endpoints)
       ackBackMsg = GossipAckBackMessage(known)
-      self.outbound.get(sender).send_obj("gossip",VERB_ACKBACK,ackBackMsg)
+      self.send(sender,VERB_ACKBACK,ackBackMsg)
   def ackBack(self,sender,ack_back_msg):
     debug_print('ack_back:', ack_back_msg)
     self.update_states(ack_back_msg.known)
@@ -94,7 +96,7 @@ class GossipHandler:
       ackBackMsg = polyp_util.deserialize(
           GossipAckBackMessage(),message.body)
       self.ackBack(message.header.sender,ackBackMsg)
-  def send_random(self,endpoints,message,msg_type,msg_verb):
+  def send_random(self,endpoints,message,msg_verb):
     if len(endpoints) == 1:
       return
     chosen = random.choice(endpoints)
@@ -103,21 +105,30 @@ class GossipHandler:
       eps = endpoints[:]
       eps.remove(local_key)
       chosen = random.choice(eps)
-    print 'sending syn to ', chosen
+    print >>sys.stderr, 'sending syn to ', chosen
     contact = Endpoint(chosen[0],chosen[1])
-    self.outbound.get(contact).send_obj(msg_type,msg_verb,message)
+    self.send(contact, msg_verb, message)
+  def send(self,contact, msg_verb, message):
+    try:
+      self.outbound.get(contact).send_obj("gossip",msg_verb,message)
+    except (Exception), e:
+      print >>sys.stderr, e
+      #TODO: something with quarantine
+      self.endpoints.pop(ep_pair(contact))
+      print >>sys.stderr, "Removed ep"
   def gossip_round(self):
     self.heartbeat.version += 1
-    print "-" * 80
-    print 'Starting gossip round %d ' % self.heartbeat.version
+    print >>sys.stderr, "-" * 80
+    print >>sys.stderr, 'Starting gossip round %d ' % self.heartbeat.version
     if len(self.endpoints) == 1:
-      print 'No one to gossip to :-('
+      print >>sys.stderr, 'No one to gossip to :-('
       return
     digests = self.make_random_digests()
     synMsg = GossipSynMessage(digests)
-    self.send_random(self.endpoints.keys(),synMsg,"gossip",VERB_SYN)
+    self.send_random(self.endpoints.keys(),synMsg,VERB_SYN)
+    #TODO: gossip to seed, gossip to unreachable
   def make_random_digests(self):
-    #Assume we have lockk
+    #Assume we have lock
     sample_size = min(len(self.endpoints),31)
     rand_endpoints = random.sample(self.endpoints.values(),sample_size)
     if not self.state in rand_endpoints:
@@ -134,7 +145,7 @@ class GossipHandler:
       local_ep = self.endpoints.get(ep_key)
       if local_ep is None:
         #TODO
-        # check quarantine
+        # check quarantine?
         # notifications?
         self.endpoints[ep_key] = state
       elif local_ep.heartbeat.generation < state.heartbeat.generation:
