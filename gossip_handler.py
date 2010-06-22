@@ -18,7 +18,10 @@ from thrift.transport import TTransport
 VERB_SYN="syn"
 VERB_ACK="ack"
 VERB_ACKBACK="ackback"
-#TODO: delete
+RING_DELAY = 60.0 #Assume ring has stabilized after a minute
+MAX_UNREACHABLE = 100
+
+#TODO: Do some actual logging...
 def debug_print(header,obj):
   print >>sys.stderr, "-" * 80
   print >>sys.stderr, header
@@ -61,13 +64,45 @@ class GossipHandler:
     self.endpoints = {}
     self.endpoints[ep_pair(self.local)] = self.state
     self.unreachable = []
-    self.quarantine = {}#{Endpoint : sys time of rejoin}
+    self.quarantine = {}#{ep_pair(Endpoint) : time.time() of rejoin}
     for seed in seeds:
       self.endpoints[seed] = \
         EndpointState(Endpoint(seed[0],seed[1]),HeartBeatState(FIRST_GEN,0),{})
     self.living = []
     self.outbound = sending_service
     self.synThread = SynThread(self,delay)
+  def add_unreachable(self,ep):
+    self.unreachable.append(ep)
+    print >>sys.stderr, ep, " is unreachable"
+    if len(self.unreachable) > MAX_UNREACHABLE:
+      x = self.unreachable.pop(0)
+      print >>sys.stderr, "Unreachable list is too big. Removed ", x
+  def add_quarantine(self,ep_key):
+    if ep_key in self.quarantine:
+      return
+    self.quarantine[ep_key] = time.time()
+    print >>sys.stderr, ep_key, " added to quarantine"
+  #Return true if endpoint is quarantined
+  #Note: this has has side effects!
+  def is_quarantined(self,ep):
+    if not ep in self.unreachable:
+      return False
+    ep_key = ep_pair(ep)
+    if not ep_key in self.quarantine:
+      self.add_quarantine(ep_key)
+    curTime = time.time()
+    if curTime - self.quarantine[ep_key] > RING_DELAY:
+      print ep, " no longer quarantined"
+      self.quarantine.pop(ep_key)
+      self.unreachable.remove(ep)
+      return False
+    return True
+  def add_endpoint(self,epState):
+    if self.is_quarantined(epState.endpoint):
+      print >>sys.stderr, epState.endpoint, " is quarantined"
+      return
+    ep_key = ep_pair(epState.endpoint)
+    self.endpoints[ep_key] = epState
   def syn(self,sender,syn_msg):
     debug_print('syn:', syn_msg)
     unknown, known = examine_digest_list(syn_msg.digests,self.endpoints)
@@ -113,8 +148,8 @@ class GossipHandler:
       self.outbound.get(contact).send_obj("gossip",msg_verb,message)
     except (Exception), e:
       print >>sys.stderr, e
-      #TODO: something with quarantine
       self.endpoints.pop(ep_pair(contact))
+      self.add_unreachable(contact)
       print >>sys.stderr, "Removed ep"
   def gossip_round(self):
     self.heartbeat.version += 1
@@ -145,9 +180,8 @@ class GossipHandler:
       local_ep = self.endpoints.get(ep_key)
       if local_ep is None:
         #TODO
-        # check quarantine?
         # notifications?
-        self.endpoints[ep_key] = state
+        self.add_endpoint(state)
       elif local_ep.heartbeat.generation < state.heartbeat.generation:
         self.endpoints[ep_key] = state
         #TODO: notifications?
@@ -196,6 +230,7 @@ def examine_digest_list(remote_digests,localEpMap):
   return (unknown,knownStates)
 
 #Mutate current state in place with changes from latest
+#States must not be None
 def update_ep_state(current_state,latest_state):
  current_state.heartbeat = latest_state.heartbeat
  current_map = current_state.info
