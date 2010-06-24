@@ -41,6 +41,12 @@ struct EndpointDigest
   2: i64 generation
   3: i64 version
 }
+# Clients use NewStateMessage to update server state
+struct NewStateMessage
+{
+  1: required string key
+  2: required string value
+}
 #  Massive hand waving over the actual algorithm:
 #  Gossiper A sends SynMessage to Gossiper B with it's known states
 #  B sends A the states B has a higher version for and requests from A 

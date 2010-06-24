@@ -9,21 +9,23 @@ sys.path.append('./gen-py')
 import polyp_util
 from polyp.ttypes import Endpoint
 from polyp.gossip.ttypes import GossipSynMessage, GossipAckMessage, GossipAckBackMessage
+from polyp.gossip.ttypes import NewStateMessage
 from polyp.gossip.constants import FIRST_GEN
-from polyp.gossip.ttypes import HeartBeatState, EndpointState, EndpointDigest
-from thrift.protocol import TBinaryProtocol
-from thrift.transport import TTransport
+from polyp.gossip.ttypes import HeartBeatState, EndpointState, EndpointDigest, ApplicationState
 
 
 VERB_SYN="syn"
 VERB_ACK="ack"
 VERB_ACKBACK="ackback"
+VERB_NEWSTATE="newstate"
+
 RING_DELAY = 60.0 #Assume ring has stabilized after a minute
 MAX_UNREACHABLE = 100
 
 #TODO: Do some actual logging...
 def debug_print(header,obj):
   print >>sys.stderr, "-" * 80
+  print >>sys.stderr, time.strftime("%Y-%M-%d %H:%m:%S")
   print >>sys.stderr, header
   print >>sys.stderr, obj
 
@@ -59,18 +61,26 @@ class GossipHandler:
   def __init__(self,sending_service,local,generation,seeds=[],delay=4.0):
     self.generation = generation
     self.local = local
-    self.heartbeat = HeartBeatState(generation,1)
+    self.local_key = ep_pair(local)
+    self.version_counter = 1
+    self.heartbeat = HeartBeatState(generation,self.version_counter)
     self.state = EndpointState(self.local,self.heartbeat,{})
     self.endpoints = {}
     self.endpoints[ep_pair(self.local)] = self.state
     self.unreachable = []
     self.quarantine = {}#{ep_pair(Endpoint) : time.time() of rejoin}
     for seed in seeds:
+      if seed == self.local_key:
+        continue
       self.endpoints[seed] = \
         EndpointState(Endpoint(seed[0],seed[1]),HeartBeatState(FIRST_GEN,0),{})
     self.living = []
     self.outbound = sending_service
     self.synThread = SynThread(self,delay)
+  def inc_version(self):
+    #TODO: lock
+    self.version_counter += 1
+    return self.version_counter
   def add_unreachable(self,ep):
     self.unreachable.append(ep)
     print >>sys.stderr, ep, " is unreachable"
@@ -92,7 +102,7 @@ class GossipHandler:
       self.add_quarantine(ep_key)
     curTime = time.time()
     if curTime - self.quarantine[ep_key] > RING_DELAY:
-      print ep, " no longer quarantined"
+      print >>sys.stderr, ep, " no longer quarantined"
       self.quarantine.pop(ep_key)
       self.unreachable.remove(ep)
       return False
@@ -131,14 +141,22 @@ class GossipHandler:
       ackBackMsg = polyp_util.deserialize(
           GossipAckBackMessage(),message.body)
       self.ackBack(message.header.sender,ackBackMsg)
+    elif message.header.verb == VERB_NEWSTATE:
+      newStateMsg = polyp_util.deserialize(NewStateMessage(),message.body)
+      self.add_application_state(newStateMsg.key,newStateMsg.value)
+  def add_application_state(self,key,value):
+    version = self.inc_version()
+    state = ApplicationState(key,value,self.generation,version)
+    debug_print("newstate:",state)
+    self.state.info[key] = state
+    return state
   def send_random(self,endpoints,message,msg_verb):
     if len(endpoints) == 1:
       return
     chosen = random.choice(endpoints)
-    local_key = ep_pair(self.local)
-    if chosen != local_key:
+    if chosen == self.local_key:
       eps = endpoints[:]
-      eps.remove(local_key)
+      eps.remove(self.local_key)
       chosen = random.choice(eps)
     print >>sys.stderr, 'sending syn to ', chosen
     contact = Endpoint(chosen[0],chosen[1])
@@ -152,9 +170,8 @@ class GossipHandler:
       self.add_unreachable(contact)
       print >>sys.stderr, "Removed ep"
   def gossip_round(self):
-    self.heartbeat.version += 1
-    print >>sys.stderr, "-" * 80
-    print >>sys.stderr, 'Starting gossip round %d ' % self.heartbeat.version
+    self.heartbeat.version = self.inc_version()
+    debug_print('Gossip round %d ' % self.heartbeat.version,self.endpoints)
     if len(self.endpoints) == 1:
       print >>sys.stderr, 'No one to gossip to :-('
       return
