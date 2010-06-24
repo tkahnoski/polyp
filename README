@@ -1,0 +1,19 @@
+This is a work in progress.
+
+Python Gossip servers to share server state
+
+These are mostly based off of Cassandra's implementaiton
+http://wiki.apache.org/cassandra/ArchitectureGossip
+which is based on the paper
+http://www.cs.cornell.edu/home/rvr/papers/flowgossip.pdf
+
+Uses thrift for serialization and asynchronous server messaging.
+You will need the thrift python libraries installed.
+http://incubator.apache.org/thrift/
+
+TODO:
+Add more interactive client
+ * Get/Return EndpointStates from server
+Add State Listener for state changes.
+Add Endpoint Listener for state changes
+Maybe drop thrift dependency for something all python?
