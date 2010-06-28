@@ -47,6 +47,14 @@ struct NewStateMessage
   1: required string key
   2: required string value
 }
+struct GetStateMessage
+{
+  1: required list<polyp.Endpoint> endpoints
+}
+struct ReturnStateMessage
+{
+  1: required list<EndpointState> states
+}
 #  Massive hand waving over the actual algorithm:
 #  Gossiper A sends SynMessage to Gossiper B with it's known states
 #  B sends A the states B has a higher version for and requests from A 
@@ -68,11 +76,3 @@ struct GossipAckBackMessage
 {
   1: required list<EndpointState> known
 }
-
-service Gossiper
-{
-  void syn(1: polyp.Endpoint sender, 2: GossipSynMessage message);
-  void ack(1: polyp.Endpoint sender, 2: GossipAckMessage message);
-  void ackBack(1: polyp.Endpoint sender, 2: GossipAckBackMessage message);
-}
-
