@@ -9,7 +9,7 @@ sys.path.append('./gen-py')
 import polyp_util
 from polyp.ttypes import Endpoint
 from polyp.gossip.ttypes import GossipSynMessage, GossipAckMessage, GossipAckBackMessage
-from polyp.gossip.ttypes import NewStateMessage
+from polyp.gossip.ttypes import NewStateMessage, GetStateMessage, ReturnStateMessage
 from polyp.gossip.constants import FIRST_GEN
 from polyp.gossip.ttypes import HeartBeatState, EndpointState, EndpointDigest, ApplicationState
 
@@ -18,6 +18,9 @@ VERB_SYN="syn"
 VERB_ACK="ack"
 VERB_ACKBACK="ackback"
 VERB_NEWSTATE="newstate"
+VERB_GETSTATE="getstate"
+VERB_RETURNSTATE="returnstate"
+
 
 RING_DELAY = 60.0 #Assume ring has stabilized after a minute
 MAX_UNREACHABLE = 100
@@ -58,7 +61,7 @@ def ep_pair(endpoint):
 class GossipHandler:
   #Initialize gossiper and start thread to periodically gossip
   #Requires generation number
-  def __init__(self,sending_service,local,generation,seeds=[],delay=4.0):
+  def __init__(self,sending_service,local,generation,seeds=[],delay=4.0,auto_synch=True):
     self.generation = generation
     self.local = local
     self.local_key = ep_pair(local)
@@ -76,7 +79,8 @@ class GossipHandler:
         EndpointState(Endpoint(seed[0],seed[1]),HeartBeatState(FIRST_GEN,0),{})
     self.living = []
     self.outbound = sending_service
-    self.synThread = SynThread(self,delay)
+    if auto_synch:
+      self.synThread = SynThread(self,delay)
   def inc_version(self):
     #TODO: lock
     self.version_counter += 1
@@ -144,12 +148,37 @@ class GossipHandler:
     elif message.header.verb == VERB_NEWSTATE:
       newStateMsg = polyp_util.deserialize(NewStateMessage(),message.body)
       self.add_application_state(newStateMsg.key,newStateMsg.value)
+    elif message.header.verb == VERB_GETSTATE:
+      getStateMsg = polyp_util.deserialize(GetStateMessage(),message.body)
+      self.get_state(message.header.sender,getStateMsg)
+    elif message.header.verb == VERB_RETURNSTATE:
+      returnStateMsg = polyp_util.deserialize(ReturnStateMessage(),message.body)
+      self.return_state(message.header.sender,returnStateMsg)
   def add_application_state(self,key,value):
     version = self.inc_version()
     state = ApplicationState(key,value,self.generation,version)
     debug_print("newstate:",state)
     self.state.info[key] = state
     return state
+  def get_state(self,sender,stateMsg):
+    endpoints = stateMsg.endpoints
+    to_send = []
+    if len(endpoints) == 0:
+       to_send = self.endpoints.values()
+    else:
+      for ep in endpoints:
+        ep_key = ep_pair(ep)
+        state = self.endpoints.get(ep_key)
+        to_send.append(state)
+    self.send(sender,"returnstate",ReturnStateMessage(to_send))
+  def return_state(self,sender,statemsg):
+     print "Status from %s:%s" % (sender.address, sender.port)
+     for ep_state in statemsg.states:
+       endpoint = ep_state.endpoint
+       heartbeat = ep_state.heartbeat
+       print endpoint.address, ':', endpoint.port
+       print "\tgeneration: %s\tversion:%s" % (heartbeat.generation, heartbeat.version)
+       print "\t", ep_state.info
   def send_random(self,endpoints,message,msg_verb):
     if len(endpoints) == 1:
       return
