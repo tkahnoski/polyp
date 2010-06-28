@@ -1,0 +1,8 @@
+TODOs:
+
+Add State Listener for state changes.
+Add Endpoint Listener for state changes
+Maybe drop thrift dependency for something all python?
+Add logging
+Make interactive_client more user friendly
+Add generation logging for various servers (lockfiles?)

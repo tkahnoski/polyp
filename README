@@ -2,18 +2,63 @@ This is a work in progress.
 
 Python Gossip servers to share server state
 
-These are mostly based off of Cassandra's implementaiton
+This is mostly based off of Cassandra's implementaiton:
 http://wiki.apache.org/cassandra/ArchitectureGossip
-which is based on the paper
+which is based on the paper:
 http://www.cs.cornell.edu/home/rvr/papers/flowgossip.pdf
 
-Uses thrift for serialization and asynchronous server messaging.
-You will need the thrift python libraries installed.
-http://incubator.apache.org/thrift/
+Requirements:
+* Python
+* Thrift
+	thrift is used for serialization and asynchronous server messaging.
+	You will need the thrift python libraries installed.
+	http://incubator.apache.org/thrift/
 
-TODO:
-Add more interactive client
- * Get/Return EndpointStates from server
-Add State Listener for state changes.
-Add Endpoint Listener for state changes
-Maybe drop thrift dependency for something all python?
+Platform:
+	Running locally on Python 2.6 on MacOSX 10.6
+
+Quick and dirty run through:
+	In the polyp directory:	
+	$ thrift --gen py polyp.thrift
+	$ thrift --gen py gossip.thrift
+	$ sh test/test_spawn.sh
+	Starting on port: 9990
+	Starting on port: 9991
+	Starting on port: 9992
+	Starting on port: 9993
+	Starting on port: 9999
+	$ python interactive_client.py -g test/test.lst
+	Starting polyp server en localhost:9000
+	add_polyp <host>:<port> -- Add a polyp to the index
+	get_state <polyp index> -- retrieve Polyp State information
+	help -- display this message
+	quit -- Exit the prompt
+	show_polyps -- Show the polyps and their index
+	> show_polyps
+	0 :  ('localhost', 9990)
+	1 :  ('localhost', 9991)
+	2 :  ('localhost', 9992)
+	3 :  ('localhost', 9993)
+	4 :  ('localhost', 9999)
+	> get_state 0
+	GetStateMessage(endpoints=[Endpoint(port=9990, address='localhost'), Endpoint(port=9991, address='localhost'), Endpoint(port=9992, address='localhost'), Endpoint(port=9993, address='localhost'), Endpoint(port=9999, address='localhost')])
+	> Status from localhost:9990
+	localhost : 9990
+		generation: 0	version:5
+		{}
+	localhost : 9991
+		generation: 0	version:4
+		{}
+	localhost : 9992
+		generation: 0	version:5
+		{}
+	localhost : 9993
+		generation: 0	version:4
+		{}
+	localhost : 9999
+		generation: 0	version:5
+		{}
+	quit
+	$ sh test/kill_spawns.sh
+
+Gossip activity for the test spawns is verbosely logged into test/*.log
