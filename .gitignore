@@ -1,3 +1,4 @@
-/*.log
+*.log
 *.pyc
 *.py-e
+/gen-py
