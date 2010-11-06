@@ -27,11 +27,11 @@ class MyTServerSocket(TSocket.TServerSocket):
 
 class MessageHandler:
   def __init__(self, handlers={}):
-    print "Polyp Handler initialized"
+    #print "Polyp Handler initialized"
     self.handlers = handlers
   def receive(self,message):
-    print "Received from %s %s" % (message.header.sender, message.header.id)
-    print message.header.msg_type
+    #print "Received from %s %s" % (message.header.sender, message.header.id)
+    #print message.header.msg_type
     for handler in self.handlers.get(message.header.msg_type,[]):
       handler.handleMessage(message)
   def registerHandler(self,msg_type,handler):
@@ -44,7 +44,7 @@ class EchoHandler:
     pass
   def handleMessage(self,message):
     echoHeader = polyp_util.deserialize(Header(),message.body)
-    print "Echo: ", echoHeader.verb 
+    print "Echo: ", echoHeader.verb
 
 def main(args):
   p = optparse.OptionParser("Start the polyp server")
@@ -65,39 +65,52 @@ def main(args):
   address = opts.address
   port = opts.port
   background = opts.background
-  endpoint = Endpoint(address,port) 
   messager = MessageHandler()
+  PolypServer(address, port,
+              messager,
+              seeds=seeds,
+              background=opts.background)
 
-  gossiper = GossipHandler(PolypPool(endpoint),endpoint,0,seeds)
-  messager.registerHandler('gossip',gossiper)
-  messager.registerHandler('echo',EchoHandler)
-  processor = Daemon.Processor(messager)
-  transport = MyTServerSocket(address,port)
-  tfactory = TTransport.TBufferedTransportFactory()
-  pfactory = TBinaryProtocol.TBinaryProtocolFactory()
+class PolypServer(object):
+  def __init__(self, address, port, messager,
+  				seeds=[],
+				background=False,
+				server=True):
+    endpoint = Endpoint(address,port)
+    gossiper = GossipHandler(PolypPool(endpoint),
+					endpoint,
+					0,
+					seeds,
+					auto_synch=server)
+    messager.registerHandler('gossip',gossiper)
+    messager.registerHandler('echo',EchoHandler)
+    processor = Daemon.Processor(messager)
+    transport = MyTServerSocket(address,port)
+    tfactory = TTransport.TBufferedTransportFactory()
+    pfactory = TBinaryProtocol.TBinaryProtocolFactory()
 
-  server = TServer.TThreadPoolServer(processor, transport, tfactory, pfactory)
-  def server_thread():
+    server = TServer.TThreadPoolServer(processor, transport, tfactory, pfactory)
+    def server_thread():
+      try:
+        server.serve()
+      except KeyboardInterrupt, e:
+        print "Exiting..."
+        sys.exit(0)
     try:
-      server.serve()
+       thread = threading.Thread(target=server_thread,name="ServerThread")
+       print "Starting polyp server en %s:%d" % (address,port)
+       if not background:
+          print "Ctrl^D or 'exit' to quit"
+       thread.start()
+       if not background:
+          for line in sys.stdin:
+             if line.strip() == 'exit':
+              break
+          print "Exiting..."
+          sys.exit(0)
     except KeyboardInterrupt, e:
-      print "Exiting..."
-      sys.exit(0)
-  try:
-    thread = threading.Thread(target=server_thread,name="ServerThread")
-    print "Starting polyp server en %s:%d" % (address,port)
-    if not background:
-      print "Ctrl^D or 'exit' to quit"
-    thread.start()
-    if not background:
-      for line in sys.stdin:
-        if line.strip() == 'exit':
-          break
-      print "Exiting..."
-      sys.exit(0)
-  except KeyboardInterrupt, e:
-    print "Exiting..."
-    sys.exit(0)
+       print "Exiting..."
+       sys.exit(0)
 
 if __name__ == '__main__':
   main(sys.argv[1:])
